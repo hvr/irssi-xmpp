@@ -1,5 +1,5 @@
 /*
- * $Id: fe-muc.c,v 1.4 2008/12/08 11:21:34 cdidier Exp $
+ * $Id: fe-muc.c,v 1.10 2010/08/09 20:45:44 cdidier Exp $
  *
  * Copyright (C) 2007 Colin DIDIER
  *
@@ -23,10 +23,12 @@
 #include "module-formats.h"
 #include "printtext.h"
 #include "signals.h"
+#include "window-items.h"
 #include "fe-common/core/module-formats.h"
 #include "fe-common/irc/module-formats.h"
 
 #include "xmpp-servers.h"
+#include "xmpp-commands.h"
 #include "rosters-tools.h"
 #include "xep/muc.h"
 #include "xep/muc-nicklist.h"
@@ -121,13 +123,16 @@ sig_nick_in_use(MUC_REC *channel, const char *nick)
 }
 
 static void
-sig_mode(MUC_REC *channel, const char *nick, int affiliation,
+sig_mode(MUC_REC *channel, const char *nickname, int affiliation,
     int role)
 {
+	XMPP_NICK_REC *nick;
 	char *mode, *affiliation_str, *role_str;
 
 	g_return_if_fail(IS_MUC(channel));
-	g_return_if_fail(nick != NULL);
+	g_return_if_fail(nickname != NULL);
+	if ((nick = xmpp_nicklist_find(channel, nickname)) == NULL)
+		return;
 	switch (affiliation) {
 	case XMPP_NICKLIST_AFFILIATION_OWNER:
 		affiliation_str = "O";
@@ -159,11 +164,64 @@ sig_mode(MUC_REC *channel, const char *nick, int affiliation,
 	}
 	if (*affiliation_str == '\0' && *role_str == '\0')
 		return;
-	mode = g_strconcat("+", affiliation_str, role_str, " ", nick,  NULL);
+	mode = g_strconcat("+", affiliation_str, role_str, " ", nickname,
+	    (void *)NULL);
+	if (ignore_check(SERVER(channel->server), nickname, nick->host,
+	    channel->name, mode, MSGLEVEL_MODES))
+		goto out;
 	printformat_module(IRC_MODULE_NAME, channel->server, channel->name,
 	    MSGLEVEL_MODES, IRCTXT_CHANMODE_CHANGE, channel->name, mode,
 	    channel->name);
-	g_free(mode);
+out:	g_free(mode);
+}
+
+struct cycle_data {
+	XMPP_SERVER_REC	*server;
+	char		*joindata;
+};
+
+static int
+cycle_join(struct cycle_data *cd)
+{
+	if (IS_XMPP_SERVER(cd->server))
+		muc_join(cd->server, cd->joindata, FALSE);
+	g_free(cd->joindata);
+	free(cd);
+	return FALSE;
+}
+
+/* SYNTAX: CYCLE [<channel] [<message>] */
+static void
+cmd_cycle(const char *data, SERVER_REC *server, WI_ITEM_REC *item)
+{
+	MUC_REC *channel;
+	char *channame, *reason, *joindata;
+	struct cycle_data *cd;
+	void *free_arg;
+
+	g_return_if_fail(data != NULL);
+	CMD_XMPP_SERVER(server);
+	if (!cmd_get_params(data, &free_arg, 2 | PARAM_FLAG_OPTCHAN |
+	    PARAM_FLAG_GETREST, item, &channame, &reason))
+		return;
+	if (*channame == '\0')
+		cmd_param_error(CMDERR_NOT_ENOUGH_PARAMS);
+	if ((channel = muc_find(server, channame)) == NULL)
+		cmd_param_error(CMDERR_NOT_JOINED);
+	joindata = channel->get_join_data(CHANNEL(channel));
+	window_bind_add(window_item_window(channel),
+	    channel->server->tag, channel->name);
+	muc_part(channel, reason);
+	if ((cd = malloc(sizeof(struct cycle_data))) != NULL) {
+		cd->server = XMPP_SERVER(server);
+		cd->joindata = joindata;
+		g_timeout_add(1000, (GSourceFunc)cycle_join, cd);
+	} else {
+		muc_join(XMPP_SERVER(server), joindata, FALSE);
+		free(joindata);
+	}
+	cmd_params_free(free_arg);
+	signal_stop();
 }
 
 void
@@ -175,6 +233,7 @@ fe_muc_init(void)
 	signal_add("message xmpp muc own_nick", sig_own_nick);
 	signal_add("message xmpp muc nick in use", sig_nick_in_use);
 	signal_add("message xmpp muc mode", sig_mode);
+	signal_add_first("command cycle", cmd_cycle);
 }
 
 void
@@ -186,5 +245,6 @@ fe_muc_deinit(void)
 	signal_remove("message xmpp muc own_nick", sig_own_nick);
 	signal_remove("message xmpp muc nick in use", sig_nick_in_use);
 	signal_remove("message xmpp muc mode", sig_mode);
+	signal_remove("command cycle", cmd_cycle);
 }
 

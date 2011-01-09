@@ -1,5 +1,5 @@
 /*
- * $Id: xmpp-servers-reconnect.c,v 1.7 2008/08/23 14:01:39 cdidier Exp $
+ * $Id: xmpp-servers-reconnect.c,v 1.9 2010/08/15 21:46:07 cdidier Exp $
  *
  * Copyright (C) 2007 Colin DIDIER
  *
@@ -34,6 +34,7 @@ sig_server_connect_copy(SERVER_CONNECT_REC **dest, XMPP_SERVER_CONNECT_REC *src)
 	conn->chat_type = XMPP_PROTOCOL;
 	conn->show = src->show;
 	conn->priority = src->priority;
+	conn->prompted_password = g_strdup(src->prompted_password);
 	*dest = (SERVER_CONNECT_REC *)conn;
 }
 
@@ -62,7 +63,7 @@ xmpp_servers_reconnect_init(void)
 {
 	signal_add_first("server connect copy", sig_server_connect_copy);
 	signal_add("server reconnect save status", sig_save_status);
-	signal_add("event connected", sig_connected);
+	signal_add_last("server connected", sig_connected);
 }
 
 void
@@ -70,5 +71,5 @@ xmpp_servers_reconnect_deinit(void)
 {
 	signal_remove("server connect copy", sig_server_connect_copy);
 	signal_remove("server reconnect save status", sig_save_status);
-	signal_remove("event connected", sig_connected);
+	signal_remove("server connected", sig_connected);
 }

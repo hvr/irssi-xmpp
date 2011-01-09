@@ -1,5 +1,5 @@
 /*
- * $Id: xmpp-completion.c,v 1.23 2008/09/28 07:27:55 cdidier Exp $
+ * $Id: xmpp-completion.c,v 1.27 2010/10/24 16:16:25 cdidier Exp $
  *
  * Copyright (C) 2007 Colin DIDIER
  *
@@ -37,11 +37,11 @@ quoted_if_space(const char *name, const char *res)
 {
 	if (res != NULL)
 		return g_utf8_strchr(res, -1, ' ') == NULL ?
-		    g_strconcat(name, "/", res, NULL) :
-		    g_strconcat("\"", name, "/", res, "\"", NULL);
+		    g_strconcat(name, "/", res, (void *)NULL) :
+		    g_strconcat("\"", name, "/", res, "\"", (void *)NULL);
 	else
 		return g_utf8_strchr(name, -1, ' ') == NULL ?
-		    g_strdup(name) : g_strconcat("\"", name, "\"", NULL);
+		    g_strdup(name) : g_strconcat("\"", name, "\"", (void *)NULL);
 }
 
 static GList *
@@ -56,8 +56,7 @@ get_resources(XMPP_SERVER_REC *server, const char *nick,
 
 	g_return_val_if_fail(IS_XMPP_SERVER(server), NULL);
 	g_return_val_if_fail(nick != NULL, NULL);
-	if (resource_name != NULL)
-		len = strlen(resource_name);
+	len = resource_name != NULL ? strlen(resource_name) : 0;
 	list = NULL;
 	user = rosters_find_user(server->roster, nick, NULL, NULL);
 	if (user == NULL)
@@ -68,7 +67,7 @@ get_resources(XMPP_SERVER_REC *server, const char *nick,
 		    || g_strncasecmp(resource->name, resource_name, len) == 0)
 			list = g_list_append(list, quoted ?
 			    quoted_if_space(nick, resource->name) :
-			    g_strconcat(nick, "/", resource->name, NULL));
+			    g_strconcat(nick, "/", resource->name, (void *)NULL));
 	}
 	return list;
 }
@@ -89,14 +88,18 @@ get_jids(XMPP_SERVER_REC *server, const char *jid)
 			user = (XMPP_ROSTER_USER_REC *)ul->data;
 			if (strncmp(user->jid, jid, len) == 0) {
 				if (user->resources != NULL)
-					g_list_append(list, user->jid);
+					list = g_list_append(list,
+					    g_strdup(user->jid));
 				else 
-					g_list_append(offlist, user->jid);
+					offlist = g_list_append(offlist,
+					    g_strdup(user->jid));
 			} else if (g_strncasecmp(user->jid, jid, len) == 0) {
 				if (user->resources != NULL)
-					g_list_append(list_case, user->jid);
+					list_case = g_list_append(list_case,
+					     g_strdup(user->jid));
 				else
-					g_list_append(offlist_case, user->jid);
+					offlist_case = g_list_append(offlist_case,
+					     g_strdup(user->jid));
 			}
 		}
 	}

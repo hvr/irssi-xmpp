@@ -1,5 +1,5 @@
 /*
- * $Id: rosters-tools.c,v 1.4 2008/12/08 10:05:41 cdidier Exp $
+ * $Id: rosters-tools.c,v 1.7 2010/07/14 16:07:13 cdidier Exp $
  *
  * Copyright (C) 2007 Colin DIDIER
  *
@@ -21,7 +21,6 @@
 #include <stdlib.h>
 
 #include "module.h"
-#include "settings.h"
 
 #include "xmpp-servers.h"
 #include "rosters-tools.h"
@@ -85,7 +84,7 @@ rosters_find_user(GSList *groups, const char *jid,
 
 	if ((pos = xmpp_find_resource_sep(jid)) != NULL)
 		*pos = '\0';
-	ul = NULL;
+	group_tmp = ul = NULL;
 	for (gl = groups; ul == NULL && gl != NULL;
 	    gl = gl->next) {
 		ul = g_slist_find_custom(
@@ -170,12 +169,12 @@ rosters_resolve_name(XMPP_SERVER_REC *server, const char *name)
 				resource = user->resources->data;
 				if (resource->name != NULL)
 					return g_strconcat(user->jid, "/",
-					    resource->name, NULL);
+					    resource->name, (void *)NULL);
 			}
 			return g_strdup(user->jid);
 		}
 		res = xmpp_extract_resource(name);
-		str = g_strconcat(user->jid, "/", res, NULL);
+		str = g_strconcat(user->jid, "/", res, (void *)NULL);
 		g_free(res);
 		return str;
 	}

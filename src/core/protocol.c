@@ -1,7 +1,7 @@
 /*
- * $Id: protocol.c,v 1.5 2008/08/30 16:54:09 cdidier Exp $
+ * $Id: protocol.c,v 1.8 2010/07/14 16:07:13 cdidier Exp $
  *
- * Copyright (C) 2007 Colin DIDIER
+ * Copyright (C) 2007,2008,2009 Colin DIDIER
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -33,8 +33,10 @@ sig_set_presence(XMPP_SERVER_REC *server, const int show, const char *status,
 
 	g_return_if_fail(IS_XMPP_SERVER(server));
 	if (!xmpp_presence_changed(show, server->show, status,
-	    server->away_reason, priority, server->priority))
+	    server->away_reason, priority, server->priority)) {
+		signal_stop();
 		return;
+	}
 	server->show = show;
 	g_free(server->away_reason);
 	server->away_reason = g_strdup(status);
@@ -73,11 +75,10 @@ sig_recv_message(XMPP_SERVER_REC *server, LmMessage *lmsg, const int type,
 	    && type != LM_MESSAGE_SUB_TYPE_CHAT)
 	    || server->ischannel(SERVER(server), from))
 		return;
-	/* TODO: get timestamp */
 	node = lm_message_node_get_child(lmsg->node, "subject");
 	if (node != NULL && node->value != NULL && *node->value != '\0') {
 		str = xmpp_recode_in(node->value);
-		subject = g_strconcat("Subject: ", str, NULL);
+		subject = g_strconcat("Subject: ", str, (void *)NULL);
 		g_free(str);
 		signal_emit("message private", 4, server, subject, from, from);
 		g_free(subject);
@@ -99,7 +100,7 @@ sig_recv_message(XMPP_SERVER_REC *server, LmMessage *lmsg, const int type,
 void
 protocol_init(void)
 {
-	signal_add("xmpp set presence", sig_set_presence);
+	signal_add_first("xmpp set presence", sig_set_presence);
 	signal_add("xmpp recv message", sig_recv_message);
 }
 

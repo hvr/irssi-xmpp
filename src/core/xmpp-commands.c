@@ -1,5 +1,5 @@
 /*
- * $Id: xmpp-commands.c,v 1.56 2008/12/06 18:33:38 cdidier Exp $
+ * $Id: xmpp-commands.c,v 1.61 2010/07/14 16:07:13 cdidier Exp $
  *
  * Copyright (C) 2007 Colin DIDIER
  *
@@ -71,7 +71,10 @@ cmd_connect_get_line(const char *data)
 	if (!cmd_get_params(data, &free_arg, 2 | PARAM_FLAG_OPTIONS,
 	    "xmppconnect", &optlist, &jid, &password))
 		return NULL;
-	if (*jid == '\0' || *password == '\0' || !xmpp_have_domain(jid)) {
+	if (*password == '\0')
+		password = g_strdup("\r"); /* we will prompt for password later */
+	if (*jid == '\0' || password == NULL || *password == '\0'
+	    || !xmpp_have_domain(jid)) {
 		cmd_params_free(free_arg);
 		signal_emit("error command", 1,
 		    GINT_TO_POINTER(CMDERR_NOT_ENOUGH_PARAMS));
@@ -81,7 +84,7 @@ cmd_connect_get_line(const char *data)
 	network = g_hash_table_lookup(optlist, "network");
 	if (network == NULL || *network == '\0') {
 		char *stripped = xmpp_strip_resource(jid);
-		network = network_free = g_strconcat("xmpp:", stripped, NULL);
+		network = network_free = g_strconcat("xmpp:", stripped, (void *)NULL);
 		g_free(stripped);
 	}
 	host = g_hash_table_lookup(optlist, "host");
@@ -109,7 +112,7 @@ cmd_xmppconnect(const char *data, SERVER_REC *server, WI_ITEM_REC *item)
 	if ((line = cmd_connect_get_line(data)) == NULL)
 		return;
 	cmd_line = g_strconcat(settings_get_str("cmdchars"), "CONNECT ",
-	    line, NULL);
+	    line, (void *)NULL);
 	g_free(line);
 	signal_emit("send command", 3, cmd_line, server, item);
 	g_free(cmd_line);
@@ -125,7 +128,7 @@ cmd_xmppserver(const char *data, SERVER_REC *server, WI_ITEM_REC *item)
 	if ((line = cmd_connect_get_line(data)) == NULL)
 		return;
 	cmd_line = g_strconcat(settings_get_str("cmdchars"), "SERVER ",
-	    line, NULL);
+	    line, (void *)NULL);
 	g_free(line);
 	signal_emit("send command", 3, cmd_line, server, item);
 	g_free(cmd_line);
@@ -136,10 +139,11 @@ set_away(XMPP_SERVER_REC *server, const char *data)
 {
 	char **tmp;
 	const char *reason;
-	int show;
+	int show, priority;
 
 	if (!IS_XMPP_SERVER(server))
 		return;
+	priority = settings_get_int("xmpp_priority");
 	tmp = g_strsplit(data, " ", 2);
 	if (*data == '\0') {
 		show = XMPP_PRESENCE_AVAILABLE;
@@ -153,9 +157,11 @@ set_away(XMPP_SERVER_REC *server, const char *data)
 			reason = data;
 		} else
 			reason = tmp[1];
+		if (show == XMPP_PRESENCE_AWAY)
+			priority = settings_get_int("xmpp_priority_away");
 	}
 	signal_emit("xmpp set presence", 4, server, show, reason,
-	    server->priority);
+	    priority);
 	g_strfreev(tmp);
 }
 
@@ -215,12 +221,12 @@ cmd_roster_full(const char *data, XMPP_SERVER_REC *server, WI_ITEM_REC *item)
 	gboolean oldvalue;
 
 	CMD_XMPP_SERVER(server);
-	oldvalue = settings_get_bool("roster_show_offline");
+	oldvalue = settings_get_bool("xmpp_roster_show_offline");
 	if (!oldvalue)
-		settings_set_bool("roster_show_offline", TRUE);
+		settings_set_bool("xmpp_roster_show_offline", TRUE);
 	signal_emit("xmpp roster show", 1, server);
 	if (!oldvalue)
-		settings_set_bool("roster_show_offline", oldvalue);
+		settings_set_bool("xmpp_roster_show_offline", oldvalue);
 }
 
 /* SYNTAX: ROSTER ADD <jid> */
@@ -229,12 +235,14 @@ cmd_roster_add(const char *data, XMPP_SERVER_REC *server)
 {
 	LmMessage *lmsg;
 	LmMessageNode *query_node, *item_node;
+	GHashTable *optlist;
 	const char *jid;
 	char *jid_recoded;
 	void *free_arg;
 
 	CMD_XMPP_SERVER(server);
-	if (!cmd_get_params(data, &free_arg, 1, &jid))
+	if (!cmd_get_params(data, &free_arg, 1 | PARAM_FLAG_OPTIONS,
+	    "roster add", &optlist, &jid))
 		return;
 	if (*jid == '\0') 
 		cmd_param_error(CMDERR_NOT_ENOUGH_PARAMS);
@@ -247,7 +255,7 @@ cmd_roster_add(const char *data, XMPP_SERVER_REC *server)
 	lm_message_node_set_attribute(item_node, "jid", jid_recoded);
 	signal_emit("xmpp send iq", 2, server, lmsg);
 	lm_message_unref(lmsg);
-	if (settings_get_bool("roster_add_send_subscribe")) {
+	if (g_hash_table_lookup(optlist, "nosub") == NULL) {
 		lmsg = lm_message_new_with_sub_type(jid_recoded,
 		    LM_MESSAGE_TYPE_PRESENCE, LM_MESSAGE_SUB_TYPE_SUBSCRIBE);
 		signal_emit("xmpp send presence", 2, server, lmsg);
@@ -521,7 +529,7 @@ cmd_me(const char *data, XMPP_SERVER_REC *server, WI_ITEM_REC *item)
 	if (type == SEND_TARGET_NICK)
 		signal_emit("message xmpp own_action", 4, server, data, target,
 		    SEND_TARGET_NICK);
-	str = g_strconcat("/me ", data, NULL);
+	str = g_strconcat("/me ", data, (void *)NULL);
 	recoded = recode_out(SERVER(server), str, target);
 	g_free(str);
 	server->send_message(SERVER(server), target, recoded, type);
@@ -536,7 +544,7 @@ xmpp_get_dest(const char *cmd_dest, XMPP_SERVER_REC *server, WI_ITEM_REC *item)
 
 	if (cmd_dest == NULL || *cmd_dest == '\0')
 		return IS_QUERY(item) ? g_strdup(QUERY(item)->name)
-		    : g_strconcat(server->jid, "/", server->resource, NULL);
+		    : g_strconcat(server->jid, "/", server->resource, (void *)NULL);
 	if (IS_CHANNEL(item)
 	    && (nick = nicklist_find(CHANNEL(item), cmd_dest)) != NULL)
 		return g_strdup(nick->host);
@@ -558,6 +566,7 @@ xmpp_commands_init(void)
 	command_bind_xmpp("roster", NULL, (SIGNAL_FUNC)cmd_roster);
 	command_bind_xmpp("roster full", NULL, (SIGNAL_FUNC)cmd_roster_full);
 	command_bind_xmpp("roster add", NULL, (SIGNAL_FUNC)cmd_roster_add);
+	command_set_options("roster add", "nosub");
 	command_bind_xmpp("roster remove", NULL,
 	    (SIGNAL_FUNC)cmd_roster_remove);
 	command_bind_xmpp("roster name", NULL, (SIGNAL_FUNC)cmd_roster_name);
@@ -573,7 +582,6 @@ xmpp_commands_init(void)
 	    (SIGNAL_FUNC)cmd_presence_unsubscribe);
 	command_bind_xmpp("me", NULL, (SIGNAL_FUNC)cmd_me);
 	settings_add_str("xmpp", "xmpp_default_away_mode", "away");
-	settings_add_bool("xmpp_roster", "roster_add_send_subscribe", TRUE);
 }
 
 void

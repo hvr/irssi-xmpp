@@ -1,5 +1,5 @@
 /*
- * $Id: text-muc.c,v 1.2 2008/09/04 15:39:39 cdidier Exp $
+ * $Id: text-muc.c,v 1.5 2009/06/17 17:36:03 cdidier Exp $
  *
  * Copyright (C) 2007 Colin DIDIER
  *
@@ -20,10 +20,8 @@
 #include "module.h"
 #include "settings.h"
 #include "signals.h"
+#include "statusbar-item.h"
 #include "window-items.h"
-
-/* in include/irssi/src/fe-text */
-#include "statusbar.h"
 
 #include "xmpp-servers.h"
 #include "xep/muc.h"
@@ -32,27 +30,28 @@ static void
 update_nick_statusbar(XMPP_SERVER_REC *server, MUC_REC *channel,
     gboolean redraw)
 {
-	g_free(server->nick);
-	server->nick = g_strdup(IS_MUC(channel) ? channel->nick
+	char *newnick;
+
+	newnick = IS_MUC(channel) ? channel->nick
 	    : settings_get_bool("xmpp_set_nick_as_username") ?
-	    server->user : server->jid);
+	    server->user : server->jid;
+	if (strcmp(server->nick, newnick) == 0)
+		return;
+	g_free(server->nick);
+	server->nick = g_strdup(newnick);
 	if (redraw)
-		statusbar_redraw(NULL, TRUE);
+		statusbar_items_redraw("user");
 }
 
 static void
 sig_window_changed(WINDOW_REC *window, WINDOW_REC *oldwindow)
 {
 	XMPP_SERVER_REC *server;
-	MUC_REC *channel;
 
 	g_return_if_fail(window != NULL);
 	if ((server = XMPP_SERVER(window->active_server)) == NULL)
 		return;
-	channel = MUC(window->active);
-	if (channel != NULL
-	    || (oldwindow != NULL && IS_MUC(oldwindow->active)))
-		update_nick_statusbar(server, channel, FALSE);
+	update_nick_statusbar(server, MUC(window->active), FALSE);
 }
 
 static void

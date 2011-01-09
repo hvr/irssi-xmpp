@@ -1,7 +1,7 @@
 /*
- * $Id: muc.c,v 1.4 2008/12/06 15:33:18 cdidier Exp $
+ * $Id: muc.c,v 1.10 2010/07/14 16:07:13 cdidier Exp $
  *
- * Copyright (C) 2007 Colin DIDIER
+ * Copyright (C) 2007,2008,2009 Colin DIDIER
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -37,6 +37,17 @@
 #include "muc-nicklist.h"
 #include "muc-reconnect.h"
 
+static char *
+get_join_data(MUC_REC *channel)
+{
+	if (channel->key != NULL)
+		return g_strdup_printf("\"%s/%s\" \"%s\"",
+		    channel->name, channel->nick, channel->key);
+	else
+		return g_strdup_printf("\"%s/%s\"",
+		    channel->name, channel->nick);
+}
+
 CHANNEL_REC *
 muc_create(XMPP_SERVER_REC *server, const char *name,
     const char *visible_name, int automatic, const char *nick)
@@ -52,6 +63,7 @@ muc_create(XMPP_SERVER_REC *server, const char *name,
 	  settings_get_str("nick") : server->user);
 	channel_init((CHANNEL_REC *)rec, SERVER(server), name, visible_name,
 	    automatic);
+	rec->get_join_data = (char *(*)(CHANNEL_REC *))get_join_data;
 	return (CHANNEL_REC *)rec;
 }
 
@@ -65,13 +77,13 @@ muc_nick(MUC_REC *channel, const char *nick)
 	g_return_if_fail(IS_MUC(channel));
 	if (!channel->server->connected)
 		return;
-	str = g_strconcat(channel->name, "/", nick, NULL);
+	str = g_strconcat(channel->name, "/", nick, (void *)NULL);
 	recoded = xmpp_recode_out(str);
 	g_free(str);
 	lmsg = lm_message_new(recoded, LM_MESSAGE_TYPE_PRESENCE);
 	g_free(recoded);
 	node = lm_message_node_add_child(lmsg->node, "x", NULL);
-	lm_message_node_set_attribute(node, "xmlns", XMLNS_MUC);
+	lm_message_node_set_attribute(node, XMLNS, XMLNS_MUC);
 	if (!channel->joined) {
 		if (channel->key != NULL) {
 			recoded = xmpp_recode_out(channel->key);
@@ -147,14 +159,14 @@ send_part(MUC_REC *channel, const char *reason)
 
 	if (!channel->server->connected)
 		return;
-	channame = g_strconcat(channel->name, "/", channel->nick, NULL);
+	channame = g_strconcat(channel->name, "/", channel->nick, (void *)NULL);
 	recoded = xmpp_recode_out(channame);
 	g_free(channame);
 	lmsg = lm_message_new_with_sub_type(recoded,
 	    LM_MESSAGE_TYPE_PRESENCE, LM_MESSAGE_SUB_TYPE_UNAVAILABLE);
 	g_free(recoded);
 	node = lm_message_node_add_child(lmsg->node, "x", NULL);
-	lm_message_node_set_attribute(node, "xmlns", XMLNS_MUC);
+	lm_message_node_set_attribute(node, XMLNS, XMLNS_MUC);
 	if (reason != NULL) {
 		recoded = xmpp_recode_out(reason);
 		lm_message_node_add_child(lmsg->node, "status", recoded);
@@ -278,6 +290,18 @@ ischannel_func(SERVER_REC *server, const char *data)
 	return r;
 }
 
+MUC_REC *
+get_muc(XMPP_SERVER_REC *server, const char *data)
+{
+	MUC_REC *channel;
+	char *str;
+
+	str = muc_extract_channel(data);
+	channel = muc_find(server, str);
+	g_free(str);
+	return channel;
+}
+
 static void
 sig_connected(SERVER_REC *server)
 {
@@ -303,6 +327,45 @@ sig_connected(SERVER_REC *server)
 	}
 }
 
+static void
+send_muc_presence(MUC_REC *channel, const int show, const char *status)
+{
+	LmMessage *lmsg;
+	char *channame, *str;
+
+	channame = g_strconcat(channel->name, "/", channel->nick, (void *)NULL);
+	str = xmpp_recode_out(channame);
+	g_free(channame);
+	lmsg = lm_message_new(str, LM_MESSAGE_TYPE_PRESENCE);
+	g_free(str);
+	if (show != XMPP_PRESENCE_AVAILABLE)
+		lm_message_node_add_child(lmsg->node, "show",
+		    xmpp_presence_show[show]);
+	if (status != NULL) {
+		str = xmpp_recode_out(status);
+		lm_message_node_add_child(lmsg->node, "status", str);
+		g_free(str);
+	}
+	signal_emit("xmpp send presence", 2, channel->server, lmsg);
+	lm_message_unref(lmsg);
+}
+
+static void
+sig_set_presence(XMPP_SERVER_REC *server, const int show, const char *status,
+    const int priority)
+{
+	GSList *tmp;
+	MUC_REC *channel;
+
+	g_return_if_fail(IS_XMPP_SERVER(server));
+	if (!server->connected)
+		return;
+	for (tmp = server->channels; tmp != NULL; tmp = tmp->next) {
+		channel = MUC(tmp->data);
+		send_muc_presence(channel, show, status);
+	}
+}
+
 void
 muc_init(void)
 {
@@ -322,6 +385,7 @@ muc_init(void)
 	signal_add("channel created", sig_channel_created);
 	signal_add("channel destroyed", sig_channel_destroyed);
 	signal_add("server connected", sig_connected);
+	signal_add("xmpp set presence", sig_set_presence);
 
 	settings_add_int("xmpp_lookandfeel", "xmpp_history_maxstanzas", 30);
 }
@@ -333,6 +397,7 @@ muc_deinit(void)
 	signal_remove("channel created", sig_channel_created);
 	signal_remove("channel destroyed",sig_channel_destroyed);
 	signal_remove("server connected", sig_connected);
+	signal_remove("xmpp set presence", sig_set_presence);
 
 	muc_commands_deinit();
 	muc_events_deinit();

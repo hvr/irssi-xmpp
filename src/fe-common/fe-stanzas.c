@@ -1,5 +1,5 @@
 /*
- * $Id: fe-stanzas.c,v 1.1 2008/08/15 00:25:21 cdidier Exp $
+ * $Id: fe-stanzas.c,v 1.4 2010/07/14 16:07:13 cdidier Exp $
  *
  * Copyright (C) 2007 Colin DIDIER
  *
@@ -38,7 +38,7 @@ get_console(XMPP_SERVER_REC *server)
 	g_return_val_if_fail(IS_XMPP_SERVER(server), NULL);
 	name = g_strconcat("(raw:", (server->connrec->chatnet == NULL ||
 	    *server->connrec->chatnet == '\0') ? server->jid :
-	    server->connrec->chatnet, ")", NULL);
+	    server->connrec->chatnet, ")", (void *)NULL);
 	if ((window = window_find_name(name)) == NULL) {
 		window = window_create(NULL, TRUE);
 		window_set_name(window, name);
@@ -59,7 +59,7 @@ sig_xml_in(XMPP_SERVER_REC *server, const char *msg)
 	g_return_if_fail(IS_XMPP_SERVER(server));
 	g_return_if_fail(msg != NULL);
 	if ((window = get_console(server)) != NULL) {
-		len = g_strdup_printf("%lu", strlen(msg));
+		len = g_strdup_printf("%lu", (unsigned long)strlen(msg));
 		printformat_module_window(MODULE_NAME, window, MSGLEVEL_CRAP,
 		    XMPPTXT_RAW_IN_HEADER, len);
 		g_free(len);
@@ -79,7 +79,7 @@ sig_xml_out(XMPP_SERVER_REC *server, const char *msg)
 	g_return_if_fail(IS_XMPP_SERVER(server));
 	g_return_if_fail(msg != NULL);
 	if ((window = get_console(server)) != NULL) {
-		len = g_strdup_printf("%lu", strlen(msg));
+		len = g_strdup_printf("%lu", (unsigned long)strlen(msg));
 		printformat_module_window(MODULE_NAME, window, MSGLEVEL_CRAP,
 		    XMPPTXT_RAW_OUT_HEADER, len);
 		g_free(len);

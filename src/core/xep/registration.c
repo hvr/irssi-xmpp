@@ -1,7 +1,7 @@
 /*
- * $Id: registration.c,v 1.6 2008/12/08 11:16:19 cdidier Exp $
+ * $Id: registration.c,v 1.9 2010/07/18 15:50:19 cdidier Exp $
  *
- * Copyright (C) 2007 Colin DIDIER
+ * Copyright (C) 2007,2008,2009 Colin DIDIER
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -97,9 +97,9 @@ handle_register(LmMessageHandler *handler, LmConnection *connection,
 		signal_emit("xmpp registration succeed", 2, rd->username,
 		    rd->domain);
 		cmd = g_strdup_printf(
-		    "%sXMPPCONNECT %s -host %s -port %d %s@%s %s",
+		    "%sXMPPCONNECT %s-host %s -port %d %s@%s %s",
 		    settings_get_str("cmdchars"),
-		    rd->use_ssl ? "-ssl" : "", rd->address, rd->port,
+		    rd->use_ssl ? "-ssl " : "", rd->address, rd->port,
 		    rd->username, rd->domain, rd->password);
 		signal_emit("send command", 3, cmd, NULL, NULL);
 		g_free(cmd);
@@ -118,7 +118,7 @@ send_register(struct register_data *rd)
 	lmsg = lm_message_new_with_sub_type(rd->domain,
 	    LM_MESSAGE_TYPE_IQ, LM_MESSAGE_SUB_TYPE_SET);
 	node = lm_message_node_add_child(lmsg->node, "query", NULL);
-	lm_message_node_set_attribute(node, "xmlns", XMLNS_REGISTER);
+	lm_message_node_set_attribute(node, XMLNS, XMLNS_REGISTER);
 	recoded = xmpp_recode_out(rd->username);
 	lm_message_node_add_child(node, "username", recoded);
 	g_free(recoded);
@@ -129,7 +129,7 @@ send_register(struct register_data *rd)
 	if (!lm_connection_send_with_reply(rd->lmconn, lmsg, rd->handler,
 	    NULL)) {
 		signal_emit("xmpp registration failed", 3, rd->username,
-		    rd->domain, REGISTRATION_ERROR_INFOS);
+		    rd->domain, REGISTRATION_ERROR_INFO);
 		rd_cleanup(rd);
 	}
 	lm_message_unref(lmsg);
@@ -257,7 +257,7 @@ cmd_xmppunregister(const char *data, SERVER_REC *server, WI_ITEM_REC *item)
 	lmsg = lm_message_new_with_sub_type(NULL,
 	    LM_MESSAGE_TYPE_IQ, LM_MESSAGE_SUB_TYPE_SET);
 	node = lm_message_node_add_child(lmsg->node, "query", NULL);
-	lm_message_node_set_attribute(node, "xmlns", XMLNS_REGISTER);
+	lm_message_node_set_attribute(node, XMLNS, XMLNS_REGISTER);
 	lm_message_node_add_child(node, "remove", NULL);
 	signal_emit("xmpp send iq", 2, server, lmsg);
 	lm_message_unref(lmsg);
@@ -285,7 +285,7 @@ cmd_xmpppasswd(const char *data, SERVER_REC *server, WI_ITEM_REC *item)
 	lmsg = lm_message_new_with_sub_type(XMPP_SERVER(server)->domain,
 	     LM_MESSAGE_TYPE_IQ, LM_MESSAGE_SUB_TYPE_SET);
 	node = lm_message_node_add_child(lmsg->node, "query", NULL);
-	lm_message_node_set_attribute(node, "xmlns", XMLNS_REGISTER);
+	lm_message_node_set_attribute(node, XMLNS, XMLNS_REGISTER);
 	recoded = xmpp_recode_out(XMPP_SERVER(server)->user);
 	lm_message_node_add_child(node, "username", recoded);
 	g_free(recoded);

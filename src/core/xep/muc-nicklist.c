@@ -1,5 +1,5 @@
 /*
- * $Id: muc-nicklist.c,v 1.1 2008/08/23 14:15:29 cdidier Exp $
+ * $Id: muc-nicklist.c,v 1.4 2010/07/14 16:07:13 cdidier Exp $
  *
  * Copyright (C) 2007 Colin DIDIER
  *
@@ -53,7 +53,7 @@ xmpp_nicklist_insert(MUC_REC *channel, const char *nickname,
 	rec = g_new0(XMPP_NICK_REC, 1);
 	rec->nick = g_strdup(nickname);
 	rec->host = (full_jid != NULL) ?
-	    g_strdup(full_jid) : g_strconcat(channel->name, "/", rec->nick, NULL);
+	    g_strdup(full_jid) : g_strconcat(channel->name, "/", rec->nick, (void *)NULL);
 	rec->show = XMPP_PRESENCE_AVAILABLE;
 	rec->status = NULL;
 	rec->affiliation = XMPP_NICKLIST_AFFILIATION_NONE;
@@ -178,15 +178,16 @@ xmpp_nicklist_set_modes(XMPP_NICK_REC *nick, int affiliation, int role)
 	nick->role = role;
 	switch (affiliation) {
 	case XMPP_NICKLIST_AFFILIATION_OWNER:
-		nick->other = '&';
+		nick->prefixes[0] = '&';
+		nick->prefixes[1] = '\0';
 		nick->op = TRUE;
 		break;
 	case XMPP_NICKLIST_AFFILIATION_ADMIN:
-		nick->other = NULL;
+		nick->prefixes[0] = '\0';
 		nick->op = TRUE;
 		break;
 	default:
-		nick->other = NULL;
+		nick->prefixes[0] = '\0';
 		nick->op = FALSE;
 	}
 	switch (role) {

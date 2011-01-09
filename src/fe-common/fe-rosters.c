@@ -1,5 +1,5 @@
 /*
- * $Id: fe-rosters.c,v 1.7 2008/09/28 07:35:52 cdidier Exp $
+ * $Id: fe-rosters.c,v 1.11 2010/07/25 16:29:53 cdidier Exp $
  *
  * Copyright (C) 2007 Colin DIDIER
  *
@@ -30,16 +30,38 @@
 #include "rosters-tools.h"
 #include "fe-xmpp-status.h"
 
+static void
+stroneline(char *s)
+{
+	size_t len, i, spaces;
+	char *p1, *p2;
+              
+	for (p1 = s; *p1 != '\0'; ++p1) {
+		if (isspace(*p1)) {
+			*p1 = ' ';
+			p2 = p1;
+			spaces = 0;
+			while (*(p2++) != '\0' && isspace(*p2))
+			++spaces;
+			if (spaces > 0) {
+				len = strlen(p1);
+				for (i = 0; i < len-spaces+1; ++i)
+					p1[i-spaces] = p1[i];
+			}
+		}
+	}
+}
+
 static gboolean
 user_is_shown(XMPP_ROSTER_USER_REC *user)
 {
 	g_return_val_if_fail(user != NULL, FALSE);
 	return user->resources != NULL
 	    || (user->subscription == XMPP_SUBSCRIPTION_BOTH
-	    && settings_get_bool("roster_show_offline"))
+	    && settings_get_bool("xmpp_roster_show_offline"))
 	    || (user->subscription != XMPP_SUBSCRIPTION_BOTH
-	    && (settings_get_bool("roster_show_unsuscribed")
-	    || settings_get_bool("roster_show_offline")));
+	    && (settings_get_bool("xmpp_roster_show_unsubscribed")
+	    || settings_get_bool("xmpp_roster_show_offline")));
 }
 
 static void
@@ -49,7 +71,7 @@ show_group(XMPP_SERVER_REC *server, XMPP_ROSTER_GROUP_REC *group)
 	g_return_if_fail(group != NULL);
 	printformat_module(MODULE_NAME, server, NULL, MSGLEVEL_CRAP,
 	    XMPPTXT_ROSTER_GROUP, (group->name != NULL) ?
-	    group->name : settings_get_str("roster_default_group"));
+	    group->name : settings_get_str("xmpp_roster_default_group"));
 }
 
 static const char *
@@ -67,7 +89,7 @@ get_resources(XMPP_SERVER_REC *server, GSList *list)
 	GSList *tmp;
 	GString *resources;
 	XMPP_ROSTER_RESOURCE_REC *resource;
-	char *show, *status, *priority, *text;
+	char *show, *status, *status_str, *priority, *text;
 
 	if (list == NULL)
 		return NULL;
@@ -78,9 +100,13 @@ get_resources(XMPP_SERVER_REC *server, GSList *list)
 		    format_get_text(MODULE_NAME, NULL, server, NULL,
 		        XMPPTXT_FORMAT_RESOURCE_SHOW,
 		        xmpp_presence_show[resource->show]);
+		status_str = g_strdup(resource->status);
+		if (status_str != NULL)
+			stroneline(status_str);
 		status = (resource->status == NULL) ? NULL :
 		    format_get_text(MODULE_NAME, NULL, server, NULL,
-		        XMPPTXT_FORMAT_RESOURCE_STATUS, resource->status);
+		        XMPPTXT_FORMAT_RESOURCE_STATUS, status_str);
+		g_free(status_str);
 		priority = g_strdup_printf("%d", resource->priority);
 		text = format_get_text(MODULE_NAME, NULL, server, NULL,
 		    XMPPTXT_FORMAT_RESOURCE, show, resource->name, priority,
@@ -298,11 +324,11 @@ fe_rosters_init(void)
 	signal_add("xmpp presence unsubscribe", sig_unsubscribe);
 	signal_add("xmpp presence unsubscribed", sig_unsubscribed);
 
-	settings_add_str("xmpp_roster", "roster_default_group", "General");
-	settings_add_str("xmpp_roster", "roster_service_name",
+	settings_add_str("xmpp_roster", "xmpp_roster_default_group", "General");
+	settings_add_str("xmpp_roster", "xmpp_roster_service_name",
 	    "Agents/Services");
-	settings_add_bool("xmpp_roster", "roster_show_offline", TRUE);
-	settings_add_bool("xmpp_roster", "roster_show_unsuscribed", TRUE);
+	settings_add_bool("xmpp_roster", "xmpp_roster_show_offline", TRUE);
+	settings_add_bool("xmpp_roster", "xmpp_roster_show_unsubscribed", TRUE);
 }
 
 void

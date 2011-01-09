@@ -1,7 +1,7 @@
 /*
- * $Id: muc-events.c,v 1.9 2009/03/19 11:32:44 cdidier Exp $
+ * $Id: muc-events.c,v 1.16 2010/10/24 15:56:26 cdidier Exp $
  *
- * Copyright (C) 2007 Colin DIDIER
+ * Copyright (C) 2007,2008,2009 Colin DIDIER
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -58,7 +58,7 @@ topic(MUC_REC *channel, const char *topic, const char *nickname)
 		    channel->topic_by, "");
 	else {
 		char *data = g_strconcat(" ", channel->name, " :",
-		    (channel->topic != NULL) ? channel->topic : "", NULL);
+		    (channel->topic != NULL) ? channel->topic : "", (void *)NULL);
 		signal_emit("event 332", 2, channel->server, data);
 		g_free(data);
 	}
@@ -226,24 +226,30 @@ nick_kicked(MUC_REC *channel, const char *nickname, const char *actor,
 static void
 error_message(MUC_REC *channel, const char *code)
 {
-	switch (atoi(code)) {
-	case 401:
+	int error;
+
+	error = code != NULL ? atoi(code) : MUC_ERROR_UNKNOWN;
+	switch (error) {
+	case MUC_ERROR_PASSWORD_INVALID_OR_MISSING:
 		signal_emit("xmpp muc error", 2, channel, "not allowed");
 		break;
 	}
 }
 
 static void
-error_join(MUC_REC *channel, const char *code)
+error_join(MUC_REC *channel, const char *code, const char *nick)
 {
 	char *altnick;
 	int error;
 
-	error = atoi(code);
+	if (nick != NULL && strcmp(nick, channel->nick) != 0)
+		return;
+	error = code != NULL ? atoi(code) : MUC_ERROR_UNKNOWN;
 	signal_emit("xmpp muc joinerror", 2, channel, GINT_TO_POINTER(error));
-	/* rejoin with alternate nick */
-	if (error == MUC_ERROR_USE_RESERVED_ROOM_NICK
-	    || error == MUC_ERROR_NICK_IN_USE) {
+	switch(error) {
+	case MUC_ERROR_USE_RESERVED_ROOM_NICK:
+	case MUC_ERROR_NICK_IN_USE:
+		/* rejoin with alternate nick */
 		altnick = (char *)settings_get_str("alternate_nick");
 		if (altnick != NULL && *altnick != '\0'
 		    && strcmp(channel->nick, altnick) != 0) {
@@ -255,7 +261,7 @@ error_join(MUC_REC *channel, const char *code)
 			channel->nick = altnick;
 		}
 		send_join(channel);
-		return;
+		return; /* don't destroy the channel */
 	}
 	channel_destroy(CHANNEL(channel));
 }
@@ -263,8 +269,11 @@ error_join(MUC_REC *channel, const char *code)
 static void
 error_presence(MUC_REC *channel, const char *code, const char *nick)
 {
-	switch (atoi(code)) {
-	case 409:
+	int error;
+
+	error = code != NULL ? atoi(code) : MUC_ERROR_UNKNOWN;
+	switch (error) {
+	case MUC_ERROR_NICK_IN_USE:
 		signal_emit("message xmpp muc nick in use", 2, channel, nick);
 		break;
 	}
@@ -282,7 +291,7 @@ available(MUC_REC *channel, const char *from, LmMessage *lmsg)
 	item_jid = item_nick = NULL;
 	own = forced = created = FALSE;
 	/* <x xmlns='http://jabber.org/protocol/muc#user'> */
-	if ((node = lm_find_node(lmsg->node, "x", "xmlns",
+	if ((node = lm_find_node(lmsg->node, "x", XMLNS,
 	    XMLNS_MUC_USER)) == NULL)
 		return;
 	/* <status code='110'/> */
@@ -291,6 +300,15 @@ available(MUC_REC *channel, const char *from, LmMessage *lmsg)
 	forced = lm_find_node(node, "status", "code", "210") != NULL;
 	/* <status code='201'/> */
 	own = created = lm_find_node(node, "status", "code", "201") != NULL;
+	if (created) {
+		char str[MAX_LONG_STRLEN], *data;
+
+		g_snprintf(str, sizeof(str), "%ld", (long)time(NULL));
+		data = g_strconcat("_ ", channel->name, " ", str, (void *)NULL);
+		/* muc created */
+		signal_emit("event 329", 2, channel->server, data);
+		g_free(data);
+	}
 	if ((node = lm_message_node_get_child(node, "item")) == NULL)
 		return;
 	/* <item affiliation='item_affiliation'
@@ -302,15 +320,8 @@ available(MUC_REC *channel, const char *from, LmMessage *lmsg)
 	item_jid = xmpp_recode_in( lm_message_node_get_attribute(node, "jid"));
 	item_nick = xmpp_recode_in( lm_message_node_get_attribute(node, "nick"));
 	nick = item_nick != NULL ? item_nick : from;
-	if (created) {
-		char str[MAX_LONG_STRLEN], *data;
-
-		g_snprintf(str, sizeof(str), "%ld", (long)time(NULL));
-		data = g_strconcat("_ ", channel->name, " ", str, NULL);
-		/* muc created */
-		signal_emit("event 329", 2, channel->server, data);
-		g_free(data);
-	}
+	if (nick == NULL)
+		goto err;
 	if (own || strcmp(nick, channel->nick) == 0)
 		own_event(channel, nick, item_jid, item_affiliation, item_role,
 		    forced);
@@ -323,9 +334,9 @@ available(MUC_REC *channel, const char *from, LmMessage *lmsg)
 	/* <show>show</show> */
 	node = lm_message_node_get_child(lmsg->node, "show");
 	nick_presence(channel, nick, node != NULL ? node->value : NULL, status);
-	g_free(item_jid);
-	g_free(item_nick);
 	g_free(status);
+err:	g_free(item_jid);
+	g_free(item_nick);
 }
 
 static void
@@ -338,7 +349,7 @@ unavailable(MUC_REC *channel, const char *nick, LmMessage *lmsg)
 	status_code = NULL;
 	reason = actor = item_nick = status = NULL;
 	/* <x xmlns='http://jabber.org/protocol/muc#user'> */
-	node = lm_find_node(lmsg->node, "x", "xmlns", XMLNS_MUC_USER);
+	node = lm_find_node(lmsg->node, "x", XMLNS, XMLNS_MUC_USER);
 	if (node != NULL) {
 		/* <status code='status_code'/> */
 		child = lm_message_node_get_child(node, "status");
@@ -392,7 +403,7 @@ invite(XMPP_SERVER_REC *server, const char *from, LmMessageNode *node)
 	LmMessageNode *inv, *pass;
 	CHANNEL_SETUP_REC *setup;
 	const char *to;
-	char *channame, *password, *data;
+	char *channame, *password, *joindata;
 
 	for (inv = node->children; inv != NULL; inv = inv->next) {
 		if (strcmp(inv->name, "invite") != 0
@@ -409,12 +420,12 @@ invite(XMPP_SERVER_REC *server, const char *from, LmMessageNode *node)
 			     server->connrec->chatnet);
 			if (setup != NULL && setup->autojoin
 			    && settings_get_bool("join_auto_chans_on_invite")) {
-				data = password == NULL ?
-				    g_strconcat("\"", channame, "\"", NULL)
+				joindata = password == NULL ?
+				    g_strconcat("\"", channame, "\"", (void *)NULL)
 				    : g_strconcat("\"", channame, "\" ",
-					password, NULL);
-				muc_join(server, data, TRUE);
-				g_free(data);
+					password, (void *)NULL);
+				muc_join(server, joindata, TRUE);
+				g_free(joindata);
 			}
 		}
 		g_free(channame);
@@ -422,18 +433,6 @@ invite(XMPP_SERVER_REC *server, const char *from, LmMessageNode *node)
 		g_free_not_null(server->last_invite);
 		server->last_invite = g_strdup(to);
 	}
-}
-
-static MUC_REC *
-get_muc(XMPP_SERVER_REC *server, const char *data)
-{
-	MUC_REC *channel;
-	char *str;
-
-	str = muc_extract_channel(data);
-	channel = muc_find(server, str);
-	g_free(str);
-	return channel;
 }
 
 static void
@@ -447,7 +446,7 @@ sig_recv_message(XMPP_SERVER_REC *server, LmMessage *lmsg, const int type,
 
 	nick = muc_extract_nick(from);
 	/* <x xmlns='http://jabber.org/protocol/muc#user'> */
-	node = lm_find_node(lmsg->node, "x", "xmlns", XMLNS_MUC_USER);
+	node = lm_find_node(lmsg->node, "x", XMLNS, XMLNS_MUC_USER);
 	if (node != NULL) {
 		switch (type) {
 		case LM_MESSAGE_SUB_TYPE_NOT_SET:
@@ -521,7 +520,7 @@ sig_recv_presence(XMPP_SERVER_REC *server, LmMessage *lmsg, const int type,
 		/* TODO: extract error type and name -> XMLNS_STANZAS */
 		code = lm_message_node_get_attribute(node, "code");
 		if (!channel->joined)
-			error_join(channel, code);
+			error_join(channel, code, nick);
 		else
 			error_presence(channel, code, nick);
 		break;

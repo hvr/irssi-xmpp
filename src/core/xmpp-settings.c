@@ -1,5 +1,5 @@
 /*
- * $Id: xmpp-settings.c,v 1.14 2008/09/04 15:39:39 cdidier Exp $
+ * $Id: xmpp-settings.c,v 1.16 2010/07/14 15:54:08 cdidier Exp $
  *
  * Copyright (C) 2007 Colin DIDIER
  *
@@ -37,10 +37,17 @@ read_settings(void)
 		if ((server = XMPP_SERVER(tmp->data)) == NULL)
 			continue;
 		/* update priority */
-		if (server->priority != settings_get_int("xmpp_priority"))
-			signal_emit("xmpp set presence", 4, server,
-			    server->show, server->away_reason,
-			    settings_get_int("xmpp_priority"));
+		if (server->show == XMPP_PRESENCE_AWAY) {
+			if (server->priority != settings_get_int("xmpp_priority_away"))
+				signal_emit("xmpp set presence", 4, server,
+				    server->show, server->away_reason,
+				    settings_get_int("xmpp_priority_away"));
+		} else {
+			if (server->priority != settings_get_int("xmpp_priority"))
+				signal_emit("xmpp set presence", 4, server,
+				    server->show, server->away_reason,
+				    settings_get_int("xmpp_priority"));
+		}
 		/* update nick */
 		if (settings_get_bool("xmpp_set_nick_as_username")) {
 			if (strcmp(server->nick, server->user) != 0) {
@@ -56,6 +63,8 @@ read_settings(void)
 	}
 	/* check validity */
 	str = settings_get_str("xmpp_proxy_type");
+#if 0
+	/* TODO print error message */
 	if (settings_get_bool("xmpp_use_proxy")
 	    && (str == NULL || g_ascii_strcasecmp(str, XMPP_PROXY_HTTP) != 0))
 		;
@@ -67,6 +76,7 @@ read_settings(void)
 	    || g_ascii_strcasecmp(str, xmpp_presence_show[XMPP_PRESENCE_XA]) != 0
 	    || g_ascii_strcasecmp(str, xmpp_presence_show[XMPP_PRESENCE_ONLINE]) != 0)
 		;
+#endif
 }
 
 void

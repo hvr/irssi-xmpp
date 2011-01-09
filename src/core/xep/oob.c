@@ -1,7 +1,7 @@
 /*
- * $Id: oob.c,v 1.2 2008/08/23 13:50:16 cdidier Exp $
+ * $Id: oob.c,v 1.5 2010/07/14 16:07:13 cdidier Exp $
  *
- * Copyright (C) 2007 Colin DIDIER
+ * Copyright (C) 2007,2008,2009 Colin DIDIER
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -39,7 +39,7 @@ sig_recv_x(XMPP_SERVER_REC *server, LmMessage *lmsg, const int type,
 	const char *url, *desc;
 	char *url_recoded, *desc_recoded, *str;
 
-	node = lm_find_node(lmsg->node, "x", "xmlns", XMLNS_OOB_X);
+	node = lm_find_node(lmsg->node, "x", XMLNS, XMLNS_OOB_X);
 	if (node != NULL) {
 		child = lm_message_node_get_child(node, "url");
 		if (child == NULL || child->value == NULL)
@@ -50,7 +50,7 @@ sig_recv_x(XMPP_SERVER_REC *server, LmMessage *lmsg, const int type,
 		url_recoded = xmpp_recode_in(url);
 		if (desc != NULL) {
 			desc_recoded = xmpp_recode_in(desc);
-			str = g_strconcat(desc_recoded, ": ", url_recoded);
+			str = g_strconcat(desc_recoded, ": ", url_recoded, (void *)NULL);
 			g_free(url_recoded);
 			g_free(desc_recoded);
 		} else

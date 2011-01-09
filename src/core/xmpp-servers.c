@@ -1,5 +1,5 @@
 /*
- * $Id: xmpp-servers.c,v 1.52 2008/12/06 18:33:38 cdidier Exp $
+ * $Id: xmpp-servers.c,v 1.67 2010/08/15 21:56:31 cdidier Exp $
  *
  * Copyright (C) 2007 Colin DIDIER
  *
@@ -19,6 +19,9 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <signal.h>
+#include <string.h>
+#include <termios.h>
 
 #include "module.h"
 #include "network.h"
@@ -92,6 +95,8 @@ server_cleanup(XMPP_SERVER_REC *server)
 {
 	if (!IS_XMPP_SERVER(server))
 		return;
+	if (server->timeout_tag)
+		g_source_remove(server->timeout_tag);
 	if (lm_connection_get_state(server->lmconn) !=
 	    LM_CONNECTION_STATE_CLOSED)
 		lm_connection_close(server->lmconn, NULL);
@@ -122,7 +127,7 @@ xmpp_server_init_connect(SERVER_CONNECT_REC *conn)
 	    xmpp_extract_domain(conn->nick) : g_strdup(conn->address);
 	server->jid = xmpp_have_domain(conn->nick) ?
 	    xmpp_strip_resource(conn->nick)
-	    : g_strconcat(server->user, "@", server->domain, NULL);
+	    : g_strconcat(server->user, "@", server->domain, (void *)NULL);
 	server->resource = xmpp_extract_resource(conn->nick);
 	if (server->resource == NULL)
 		server->resource = g_strdup("irssi-xmpp");
@@ -163,6 +168,7 @@ xmpp_server_init_connect(SERVER_CONNECT_REC *conn)
 	g_free(recoded);
 	lm_connection_set_keep_alive_rate(server->lmconn, 30);
 
+	server->timeout_tag = 0;
 	server_connect_init((SERVER_REC *)server);
 	server->connect_tag = 1;
 	return (SERVER_REC *)server;
@@ -234,9 +240,63 @@ lm_auth_cb(LmConnection *connection, gboolean success,
 	}
 	signal_emit("xmpp server status", 2, server,
 	    "Authenticated successfully.");
-	lookup_servers = g_slist_remove(lookup_servers, server);
-	server_connect_finished(SERVER(server));
-	signal_emit("event connected", 1, server);
+}
+
+/*
+ * Displays input prompt on command line and takes input data from user
+ * From irssi-silc (silc-client/lib/silcutil/silcutil.c)
+ */
+static char *
+get_password()
+{
+	char input[2048], *ret = NULL;
+	int fd;
+
+#ifndef DISABLE_TERMIOS
+	struct termios to;
+	struct termios to_old;
+
+	if ((fd = open("/dev/tty", O_RDONLY)) < 0) {
+		g_warning("Cannot open /dev/tty: %s\n",
+		    strerror(errno));
+		return NULL;
+	}
+    	signal(SIGINT, SIG_IGN);
+
+	/* Get terminal info */
+	tcgetattr(fd, &to);
+	to_old = to;
+	/* Echo OFF, and assure we can prompt and get input */
+	to.c_lflag &= ~(ECHO | ECHOE | ECHOK | ECHONL);
+	to.c_lflag |= ICANON;
+	to.c_cc[VMIN] = 255;
+	tcsetattr(fd, TCSANOW, &to);
+
+	printf("\tXMPP Password: ");
+	fflush(stdout);
+
+	memset(input, 0, sizeof(input));
+	if ((read(fd, input, sizeof(input))) < 0) {
+		g_warning("Cannot read from /dev/tty: %s\n",
+		    strerror(errno));
+		tcsetattr(fd, TCSANOW, &to_old);
+		return NULL;
+	}
+	if (strlen(input) <= 1) {
+		tcsetattr(fd, TCSANOW, &to_old);
+		return NULL;
+	}
+	if ((ret = strchr(input, '\n')) != NULL)
+		*ret = '\0';
+
+	/* Restore old terminfo */
+	tcsetattr(fd, TCSANOW, &to_old);
+	signal(SIGINT, SIG_DFL);
+
+	ret = g_strdup(input);
+	memset(input, 0, sizeof(input));
+#endif /* DISABLE_TERMIOS */
+	return ret;
 }
 
 static void
@@ -258,7 +318,32 @@ lm_open_cb(LmConnection *connection, gboolean success,
 		g_free(host);
 	} else
 		signal_emit("server connecting", 1, server);
+	if (server->connrec->use_ssl)
+		signal_emit("xmpp server status", 2, server, 
+		    "Using SSL encryption.");
+	else if (lm_ssl_get_use_starttls(lm_connection_get_ssl(server->lmconn)))
+		signal_emit("xmpp server status", 2, server,
+		    "Using STARTTLS encryption.");
 	recoded_user = xmpp_recode_out(server->user);
+
+	/* prompt for password or re-use typed password */
+	if (server->connrec->prompted_password != NULL) {
+		g_free_not_null(server->connrec->password);
+		server->connrec->password =
+		    g_strdup(server->connrec->prompted_password);
+	} else if (server->connrec->password == NULL
+	    || *(server->connrec->password) == '\0'
+	    || *(server->connrec->password) == '\r') {
+		g_free_not_null(server->connrec->password);
+		server->connrec->prompted_password = get_password();
+		signal_emit("send command", 1, "redraw");
+		if (server->connrec->prompted_password != NULL)
+			server->connrec->password =
+			    g_strdup(server->connrec->prompted_password);
+		else
+			server->connrec->password = g_strdup("");
+	}
+
 	recoded_password = xmpp_recode_out(server->connrec->password);
 	recoded_resource = xmpp_recode_out(server->resource);
 	lm_connection_authenticate(connection, recoded_user,
@@ -270,7 +355,8 @@ lm_open_cb(LmConnection *connection, gboolean success,
 }
 
 gboolean
-set_ssl(LmConnection *lmconn, GError **error, gpointer user_data)
+set_ssl(LmConnection *lmconn, GError **error, gpointer user_data,
+    gboolean use_starttls)
 {
 	LmSSL *ssl;
 
@@ -282,6 +368,8 @@ set_ssl(LmConnection *lmconn, GError **error, gpointer user_data)
 	}
 	ssl = lm_ssl_new(NULL, lm_ssl_cb, user_data, NULL);
 	lm_connection_set_ssl(lmconn, ssl);
+	if (use_starttls)
+		lm_ssl_use_starttls(ssl, TRUE, FALSE);
 	lm_ssl_unref(ssl);
 	return TRUE;
 }
@@ -340,6 +428,21 @@ set_proxy(LmConnection *lmconn, GError **error)
 	return TRUE;
 }
 
+static int
+check_connection_timeout(XMPP_SERVER_REC *server)
+{
+	if (g_slist_find(lookup_servers, server) == NULL)
+		return FALSE;
+	if (!server->connected) {
+		g_warning("%s: no response from server",
+		    server->connrec->address);
+		server->connection_lost = TRUE;
+		server_disconnect(SERVER(server));
+	}
+	server->timeout_tag = 0;
+	return FALSE;
+}
+
 void
 xmpp_server_connect(XMPP_SERVER_REC *server)
 {
@@ -350,11 +453,13 @@ xmpp_server_connect(XMPP_SERVER_REC *server)
 		return;
 	error = NULL;
 	err_msg = NULL;
-	if (server->connrec->use_ssl
-	    && !set_ssl(server->lmconn, &error, server)) {
-		err_msg = "Cannot init ssl";
-		goto err;
-	}
+	if (server->connrec->use_ssl) {
+		if (!set_ssl(server->lmconn, &error, server, FALSE)) {
+			err_msg = "Cannot init ssl";
+			goto err;
+		}
+	} else
+		set_ssl(server->lmconn, &error, server, TRUE);
 	if (settings_get_bool("xmpp_use_proxy")
 	    && !set_proxy(server->lmconn, &error)) {
 		err_msg = "Cannot set proxy";
@@ -364,6 +469,9 @@ xmpp_server_connect(XMPP_SERVER_REC *server)
 	    lm_close_cb, server, NULL);
 	lookup_servers = g_slist_append(lookup_servers, server);
 	signal_emit("server looking", 1, server);
+	server->timeout_tag = g_timeout_add(
+	    settings_get_time("server_connect_timeout"),
+	    (GSourceFunc)check_connection_timeout, server);
 	if (!lm_connection_open(server->lmconn,  lm_open_cb, server,
 	    NULL, &error)) {
 		err_msg = "Connection failed";
@@ -383,20 +491,13 @@ err:
 static void
 sig_connected(XMPP_SERVER_REC *server)
 {
-	if (!IS_XMPP_SERVER(server))
-		return;
-	server->connected = TRUE;
-	server->connect_tag = -1;
-	server->show = XMPP_PRESENCE_AVAILABLE;
-}
-
-static void
-sig_connected_last(XMPP_SERVER_REC *server)
-{
 	LmMessage *lmsg;
 	char *str;
 
-	if (!IS_XMPP_SERVER(server))
+	if (!IS_XMPP_SERVER(server) || (server->connrec->reconnection
+	    && xmpp_presence_changed(server->connrec->show, server->show,
+	    server->connrec->away_reason, server->away_reason,
+	    server->connrec->priority, server->priority)))
 		return;
 	/* set presence available */
 	lmsg = lm_message_new_with_sub_type(NULL, LM_MESSAGE_TYPE_PRESENCE,
@@ -451,17 +552,40 @@ sig_session_save(void)
 	disconnect_all();
 }
 
+static void
+sig_recv_iq(XMPP_SERVER_REC *server, LmMessage *lmsg, const int type,
+    const char *id, const char *from, const char *to)
+{
+	if (server->connected)
+		return;
+	if (type == LM_MESSAGE_SUB_TYPE_RESULT) {
+		/* we are fully connected when we receive the first iq stanza */
+		lookup_servers = g_slist_remove(lookup_servers, server);
+		g_source_remove(server->connect_tag);
+		server->connect_tag = -1;
+		server->show = XMPP_PRESENCE_AVAILABLE;
+		server->connected = TRUE;
+		if (server->timeout_tag) {
+			g_source_remove(server->timeout_tag);
+			server->timeout_tag = 0;
+		}
+		server_connect_finished(SERVER(server));
+		server->real_connect_time = server->connect_time;
+	}
+}
+
 void
 xmpp_servers_init(void)
 {
-	signal_add_first("server connected", sig_connected);
-	signal_add_last("server connected", sig_connected_last);
+	signal_add_last("server connected", sig_connected);
 	signal_add_last("server disconnected", server_cleanup);
 	signal_add_last("server connect failed", server_cleanup);
 	signal_add("server quit", sig_server_quit);
 	signal_add_first("session save", sig_session_save);
+	signal_add("xmpp recv iq", sig_recv_iq);
 
 	settings_add_int("xmpp", "xmpp_priority", 0);
+	settings_add_int("xmpp", "xmpp_priority_away", -1);
 	settings_add_bool("xmpp_lookandfeel", "xmpp_set_nick_as_username",
 	    FALSE);
 	settings_add_bool("xmpp_proxy", "xmpp_use_proxy", FALSE);
@@ -479,9 +603,9 @@ xmpp_servers_deinit(void)
 	disconnect_all();
 
 	signal_remove("server connected", sig_connected);
-	signal_remove("server connected", sig_connected_last);
 	signal_remove("server disconnected", server_cleanup);
 	signal_remove("server connect failed", server_cleanup);
 	signal_remove("server quit", sig_server_quit);
 	signal_remove("session save", sig_session_save);
+	signal_remove("xmpp recv iq", sig_recv_iq);
 }

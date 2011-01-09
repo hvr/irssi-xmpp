@@ -1,7 +1,7 @@
 /*
- * $Id: chatstates.c,v 1.5 2008/10/29 05:41:57 cdidier Exp $
+ * $Id: chatstates.c,v 1.7 2009/06/03 15:53:33 cdidier Exp $
  *
- * Copyright (C) 2007 Colin DIDIER
+ * Copyright (C) 2007,2008,2009 Colin DIDIER
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -33,20 +33,18 @@ static void
 sig_recv_message(XMPP_SERVER_REC *server, LmMessage *lmsg, const int type,
     const char *id, const char *from, const char *to)
 {
-	LmMessageNode *node;
-
 	if ((type != LM_MESSAGE_SUB_TYPE_NOT_SET
 	    && type != LM_MESSAGE_SUB_TYPE_HEADLINE
 	    && type != LM_MESSAGE_SUB_TYPE_NORMAL
 	    && type != LM_MESSAGE_SUB_TYPE_CHAT)
 	    || server->ischannel(SERVER(server), from))
 		return;
-	if (lm_find_node(lmsg->node, "composing", "xmlns",
+	if (lm_find_node(lmsg->node, "composing", XMLNS,
 	    XMLNS_CHATSTATES) != NULL) {
 		signal_emit("xmpp composing show", 2, server, from);
-	} else if (lm_find_node(lmsg->node, "active", "xmlns",
+	} else if (lm_find_node(lmsg->node, "active", XMLNS,
 	    XMLNS_CHATSTATES) != NULL
-	    || lm_find_node(lmsg->node, "paused", "xmlns",
+	    || lm_find_node(lmsg->node, "paused", XMLNS,
 	    XMLNS_CHATSTATES) != NULL)
 		signal_emit("xmpp composing hide", 2, server, from);
 }

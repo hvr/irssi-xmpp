@@ -1,5 +1,5 @@
 /*
- * $Id: stanzas.c,v 1.3 2008/08/24 22:03:23 cdidier Exp $
+ * $Id: stanzas.c,v 1.5 2010/05/14 14:15:06 cdidier Exp $
  *
  * Copyright (C) 2007 Colin DIDIER
  *
@@ -62,8 +62,14 @@ handle_stanza(LmMessageHandler *handler, LmConnection *connection,
 	g_free(raw);
 	type = lm_message_get_sub_type(lmsg);
 	id = lm_message_node_get_attribute(lmsg->node, "id");
+	if (id == NULL)
+		id = "";
 	from = xmpp_recode_in(lm_message_node_get_attribute(lmsg->node, "from"));
+	if (from == NULL)
+		from = g_strdup("");
 	to = xmpp_recode_in(lm_message_node_get_attribute(lmsg->node, "to"));
+	if (to == NULL)
+		to = g_strdup("");
 	switch(lm_message_get_type(lmsg)) {
 	case LM_MESSAGE_TYPE_MESSAGE:
 		signal_emit("xmpp recv message", 6,
@@ -126,7 +132,7 @@ register_stanzas(XMPP_SERVER_REC *server)
 void
 stanzas_init(void)
 {
-	signal_add_first("server connected", register_stanzas);
+	signal_add("server connecting", register_stanzas);
 	signal_add_first("server disconnected", unregister_stanzas);
 	signal_add_last("xmpp send message", send_stanza); 
 	signal_add_last("xmpp send presence", send_stanza); 
@@ -137,7 +143,7 @@ stanzas_init(void)
 void
 stanzas_deinit(void)
 {
-	signal_remove("server connected", register_stanzas);
+	signal_remove("server connecting", register_stanzas);
 	signal_remove("server disconnected", unregister_stanzas);
 	signal_remove("xmpp send message", send_stanza); 
 	signal_remove("xmpp send presence", send_stanza); 
