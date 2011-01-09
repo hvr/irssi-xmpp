@@ -398,26 +398,25 @@ unavailable(MUC_REC *channel, const char *nick, LmMessage *lmsg)
 }
 
 static void
-invite(XMPP_SERVER_REC *server, const char *from, LmMessageNode *node)
+invite(XMPP_SERVER_REC *server, const char *channame, LmMessageNode *node)
 {
 	LmMessageNode *inv, *pass;
 	CHANNEL_SETUP_REC *setup;
-	const char *to;
-	char *channame, *password, *joindata;
+	const char *from;
+	char *inviter, *password, *joindata;
 
 	for (inv = node->children; inv != NULL; inv = inv->next) {
 		if (strcmp(inv->name, "invite") != 0
-		    || (to = lm_message_node_get_attribute(inv, "to")) == NULL)
+		    || (from = lm_message_node_get_attribute(inv, "from")) == NULL)
 			continue;
-		channame = xmpp_recode_in(to);
+		inviter = xmpp_recode_in(from);
+
 		pass = lm_message_node_get_child(inv, "password");
 		password = pass != NULL ? xmpp_recode_in(pass->value) : NULL;
-		if (muc_find(server, to) == NULL) {
-			signal_emit("xmpp invite", 4, server, from,
-			    channame, password);
+		if (muc_find(server, channame) == NULL) {
+			signal_emit("xmpp invite", 4, server, inviter, channame, password);
 			/* check if we're supposed to autojoin this muc */
-			setup = channel_setup_find(channame,
-			     server->connrec->chatnet);
+			setup = channel_setup_find(channame, server->connrec->chatnet);
 			if (setup != NULL && setup->autojoin
 			    && settings_get_bool("join_auto_chans_on_invite")) {
 				joindata = password == NULL ?
@@ -428,10 +427,9 @@ invite(XMPP_SERVER_REC *server, const char *from, LmMessageNode *node)
 				g_free(joindata);
 			}
 		}
-		g_free(channame);
 		g_free(password);
 		g_free_not_null(server->last_invite);
-		server->last_invite = g_strdup(to);
+		server->last_invite = g_strdup(channame);
 	}
 }
 
@@ -450,9 +448,10 @@ sig_recv_message(XMPP_SERVER_REC *server, LmMessage *lmsg, const int type,
 	if (node != NULL) {
 		switch (type) {
 		case LM_MESSAGE_SUB_TYPE_NOT_SET:
+		case LM_MESSAGE_SUB_TYPE_NORMAL:
 			if (lm_message_node_get_child(node, "invite") != NULL)
 				invite(server, from, node);
-			break;	
+			break;
 		}
 	}
 	if ((channel = get_muc(server, from)) == NULL)
