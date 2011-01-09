@@ -59,13 +59,13 @@ cmd_invite(const char *data, XMPP_SERVER_REC *server, WI_ITEM_REC *item)
 		cmd_param_error(CMDERR_NOT_GOOD_IDEA);
 	if ((jid = rosters_resolve_name(server, dest)) != NULL)
 		dest = jid;
-	recoded = xmpp_recode_out(dest);
+	recoded = xmpp_recode_out(channame);
 	lmsg = lm_message_new(recoded, LM_MESSAGE_TYPE_MESSAGE);
 	g_free(recoded);
 	node = lm_message_node_add_child(lmsg->node, "x", NULL);
 	lm_message_node_set_attribute(node, "xmlns", XMLNS_MUC_USER);
 	invite_node = lm_message_node_add_child(node, "invite", NULL);
-	recoded = xmpp_recode_out(channame);
+	recoded = xmpp_recode_out(dest);
 	lm_message_node_set_attribute(invite_node, "to", recoded);
 	g_free(recoded);
 	if (channel->key != NULL) {
